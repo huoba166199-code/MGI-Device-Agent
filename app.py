@@ -7,15 +7,31 @@ from agent.database import init_db, load_session, save_session, clear_session
 
 st.set_page_config(page_title="MGI 测序仪智能排障", page_icon="🧬", layout="wide")
 
-# 修复下拉框的 CSS
+# 修复下拉框及侧边栏按钮的 CSS
 st.markdown("""
 <style>
     [data-testid="stHeader"] { display: none !important; }
     .stApp { background: linear-gradient(-45deg, #f0f9ff, #e0f2fe, #f8fafc, #ccfbf1) !important; }
     h1 { color: #1E3A8A !important; font-weight: 800 !important; }
     [data-testid="stAlert"] { background-color: #FEF3C7 !important; border: 1px solid #F59E0B !important; }
+
+    /* 侧边栏背景及文字颜色 */
     [data-testid="stSidebar"] { background-color: #1E293B; }
     [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3, [data-testid="stSidebar"] p, [data-testid="stSidebar"] .stMarkdown { color: #F8FAFC !important; }
+
+    /* 🔥 核心修复：侧边栏按钮的样式（透明质感，字变白） */
+    [data-testid="stSidebar"] .stButton > button {
+        background-color: transparent !important;
+        color: #F8FAFC !important;
+        border: 1px solid #475569 !important;
+        transition: all 0.3s ease;
+    }
+    /* 鼠标悬停时的效果（变亮） */
+    [data-testid="stSidebar"] .stButton > button:hover {
+        background-color: #334155 !important;
+        border-color: #94A3B8 !important;
+        color: #FFFFFF !important;
+    }
 
     /* 修复下拉框 */
     div[data-testid="stSelectbox"] > div { background-color: #F8FAFC !important; }
@@ -36,7 +52,8 @@ with st.sidebar:
     user_role = st.selectbox("当前登录身份：", ["👨‍🔬 实验员 (操作员)", "👨‍💼 科室主管 (审批人)"])
 
     st.divider()
-    if st.button("🗑️ 清空当前会话并重置状态", use_container_width=True):
+    # 按钮样式已经被上面的 CSS 接管了，现在会变成透明边框风格
+    if st.button("🗑️ 清空当前会话并重置", use_container_width=True):
         clear_session()
         st.session_state.clear()
         st.rerun()
