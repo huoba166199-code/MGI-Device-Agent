@@ -2,7 +2,7 @@ import streamlit as st
 import datetime
 import random
 import time
-from agent.graph import mgi_agent
+from agent.graph import safe_invoke_agent
 from agent.database import init_db, load_session, save_session, clear_session
 
 st.set_page_config(page_title="MGI 测序仪智能排障", page_icon="🧬", layout="wide")
@@ -100,6 +100,10 @@ if "messages" not in st.session_state:
         st.session_state.ticket_status = None
         st.session_state.ticket_data = {}
 
+# 初始化防抖锁
+if "is_processing" not in st.session_state:
+    st.session_state.is_processing = False
+
 # 渲染历史对话
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
@@ -109,6 +113,13 @@ for msg in st.session_state.messages:
 # ==========================================
 if not st.session_state.awaiting_approval and st.session_state.ticket_status not in ["维修中", "已结单"]:
     if prompt := st.chat_input("请输入测序仪报错代码或故障描述..."):
+
+        # 【防线】：如果正在处理，拦截一切新请求
+        if st.session_state.is_processing:
+            st.warning("⚠️ Agent 正在处理上一次请求，请勿重复发送！")
+            st.stop()
+
+        st.session_state.is_processing = True  # 上锁
         st.session_state.messages.append({"role": "user", "content": prompt})
 
         with st.status("Agent 多节点协作分析中...", expanded=True) as status:
@@ -117,31 +128,42 @@ if not st.session_state.awaiting_approval and st.session_state.ticket_status not
             st.write("📌 [节点2] 正在检索维修手册并提取错误码...")
             time.sleep(0.4)
 
-            res = mgi_agent.invoke({"user_query": prompt})
-            error_code = res.get('error_code', 'UNKNOWN')
-            st.write(f"✅ 检索完成，锁定错误码：`{error_code}`")
-            st.write("📌 [节点3] 诊断专家正在生成排障建议...")
-            time.sleep(0.4)
-            st.write("📌 [节点4] 规则引擎正在判定企业安全红线...")
+            try:
+                # 【防线】：调用带超时机制的安全函数
+                res = safe_invoke_agent({"user_query": prompt}, max_time=30)
 
-            st.session_state.messages.append({"role": "assistant", "content": res["ai_analysis"]})
+                error_code = res.get('error_code', 'UNKNOWN')
+                st.write(f"✅ 检索完成，锁定错误码：`{error_code}`")
+                st.write("📌 [节点3] 诊断专家正在生成排障建议...")
+                time.sleep(0.4)
+                st.write("📌 [节点4] 规则引擎正在判定企业安全红线...")
 
-            if res["final_action"] == "create_ticket":
-                st.write("🚨 **触发高危红线！已挂起，等待人工审批。**")
-                status.update(label="分析完成，等待人工介入", state="complete", expanded=True)
-                st.session_state.awaiting_approval = True
-                st.session_state.ticket_data = {
-                    "id": f"MGI-{datetime.datetime.now().strftime('%Y%m%d')}-{random.randint(1000, 9999)}",
-                    "error": error_code,
-                    "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-            else:
-                st.write("✅ 常规故障，直接输出建议。")
-                status.update(label="分析完成", state="complete", expanded=False)
+                st.session_state.messages.append({"role": "assistant", "content": res["ai_analysis"]})
+
+                if res["final_action"] == "create_ticket":
+                    st.write("🚨 **触发高危红线！已挂起，等待人工审批。**")
+                    status.update(label="分析完成，等待人工介入", state="complete", expanded=True)
+                    st.session_state.awaiting_approval = True
+                    st.session_state.ticket_data = {
+                        "id": f"MGI-{datetime.datetime.now().strftime('%Y%m%d')}-{random.randint(1000, 9999)}",
+                        "error": error_code,
+                        "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                else:
+                    st.write("✅ 常规故障，直接输出建议。")
+                    status.update(label="分析完成", state="complete", expanded=False)
+
+            except Exception as e:
+                # 捕获超时或异常，保护页面不崩，且防止死循环
+                st.error(f"🚨 Agent 执行被强制中断: {str(e)}")
+                st.session_state.is_processing = False
+                st.stop()
 
             # 【关键】保存状态到数据库
             save_session(st.session_state.messages, st.session_state.awaiting_approval, st.session_state.ticket_status,
                          st.session_state.ticket_data)
+
+        st.session_state.is_processing = False  # 解锁
         st.rerun()
 
 # ==========================================

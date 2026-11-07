@@ -50,3 +50,47 @@
 - **原因**：Streamlit 的 `st.chat_input` 或 `st.form` 在触发时，会导致页面重新加载。如果状态管理逻辑存在漏洞，按钮会被意外触发。
 - **解决**：使用 `st.session_state` 严格隔离“等待输入”和“等待审批”两个状态。当处于审批状态时，**直接从 DOM 中隐藏输入框**，防止并发提交。
 
+
+---
+
+## Q11: 用拷输入模罊描述（夂“门关不上”），大模型却越基戟股出 ERR-503，如何解决？
+
+- 盰象：用拷未不输入任何错误代，但由于上◃文内包含了 RAG 检索到的 ERR-503 维修手册，大模型为了让好数户，强衡脑补并输出了 503 的排障建议。这在医遥/工业场墀火属计“误诊老”细故。
+- "原因"：多轮对话中的**上文下桶化**。趄界数据清道中把夶，base64或或数已经被支持；世若数据是否为于已存入库。
+- "解决"：
+  1. **切断桶化源（架构层）**：颞当正则末提取到 ERR-信息（状态为 UNKNOWN），强制跳过 RAG 检索，不注入任佔维修手册。
+  2. **边界强制定（Parmpt层）**：婂果与大模型交互，不必须时求后给自己创造。将大模型必须保持经一的格式。
+
+**附：核心修复代码（graph.yp）**
+
+```python
+def retrieve_sop_node(state: AgentState):
+    # 防御 1：没错误码就跳过 RAG，防止上下文污染污染。
+    if state['error_code'] == 'UNKNOWN':
+        return {'sop_context': '暂无具体错误码对应的维修手册。'}
+    sop = search_manual(state['user_query'])
+    return {'sop_context': sop}
+
+def diagnose_node(state: AgentState):
+    # 防御 2：强束束 Prompt
+    if state['error_code'] == 'UNKNOWN':
+        prompt = f"""
+        用拷报错：{state['user_query']}
+        【系统强制死令令】:
+        1. 用户没有提供明确的 ERR 错，。
+        2. 传给对我新的 ERR-xxx 错，。
+        """
+    else:
+        prompt = f"""
+        用户报错：{state['user_query']}
+        明确：{state['error_code']}
+        维修手册：{state['sop_context']}
+        【系统强制死令令】:
+        3. 提供通用排查建议。
+        """
+    response = llm.invoke([HumanMessage(content=prompt)])
+    return {'ai_analysis': response.content}
+```
+
+> **🎙️ 答辩／面试高光话本**：
+ > “大模型有‘过度脑补’的致命弱点，当用户说‘门关不上’我们没报错，检索到了 503 手册，大模型就会顺杆爬。我在架构上做了两层防御：切断污染源（检索层过滤）和强制武入（Prompt 层），这欻再次印证了我的架构理念：**把概率性的大模型，关进确定性的工程框架！**”
